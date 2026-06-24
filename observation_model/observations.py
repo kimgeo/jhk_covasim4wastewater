@@ -101,7 +101,7 @@ def plot_sim_vs_observed(sim, new_diag, new_seq,
         # Apply Covasim style helpers
         title_grid_legend(
             ax,
-            'Simulated vs Observed (clean style)',
+            'Simulated vs Observed',
             grid, commaticks, setylim,
             args.legend, args.show
         )
