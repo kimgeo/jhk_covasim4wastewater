@@ -1,44 +1,90 @@
 import numpy as np
 
 class ObservationModel:
-    # Observation model for step-based Covasim simulation.
+    """
+    Observation model:
+    - diagnoses (testing)
+    - sequencing (genomic surveillance)
+    - variant detection
+    """
 
-    # This class maintains internal queues for delayed diagnoses and sequencing.
-    # Each day, you call step(t, new_inf_today) to process today's infections
-    # and retrieve today's observed diagnoses and sequences.
-
-    def __init__(self, T, p_test, p_seq, delay_pmf):
-        self.T = T # Total simulation length (sim.npts).
+    def __init__(self, p_test=0.1, p_seq=0.05, delay_pmf=None, variant_ref=None):
+        """
+        p_test: probability of diagnosis
+        p_seq: probability of sequencing among diagnosed
+        delay_pmf: diagnosis delay distribution
+        variant_ref: reference haplotype (string or array)
+        """
         self.p_test = p_test
         self.p_seq = p_seq
-        self.delay_pmf = np.asarray(delay_pmf, dtype=float)
+        self.delay_pmf = delay_pmf
+        self.variant_ref = variant_ref
 
-        # Queues for scheduled future diagnoses and sequences
-        self.diagnosis_queue = np.zeros(T)
-        self.sequence_queue = np.zeros(T)
+        # Variant detection tracking
+        self.variant_detected_day = None
+        self.variant_infections = None  # filled after sim run
 
-    def step(self, t, new_inf_today):
-        # Process today's infections and return today's observed diagnoses & sequences.  
+    def reconstruct_haplotype(self, genome):
+        """
+        Placeholder haplotype reconstruction.
+        In real use: apply actual reconstruction logic.
+        """
+        return genome  # assume genome is already haplotype-like
 
-        # 1) Determine how many will be diagnosed from today's infections
-        if new_inf_today > 0:
-            n_diag = np.random.binomial(int(new_inf_today), self.p_test)
+    def is_variant(self, haplotype):
+        """
+        Compare reconstructed haplotype with reference.
+        If different → variant detected.
+        """
+        return haplotype != self.variant_ref
 
-            # 2) Assign diagnoses delay according to delay_pmf
-            diag_by_delay = np.random.multinomial(n_diag, self.delay_pmf)
+    def apply(self, sim):
+        """
+        Apply observation model to simulation results.
+        Called AFTER sim.run().
+        """
 
-            for k, count in enumerate(diag_by_delay):
-                day = t + k
-                if day < self.T:
-                    self.diagnosis_queue[day] += count
+        n_days = sim.npts
 
-        # 3) Diagnoses that occur today
-        diag_today = self.diagnosis_queue[t] # Observed diagnoses on day t
+        # 1) Diagnoses
+        true_infections = sim.results['new_infections'].values
+        diagnoses = np.random.binomial(true_infections, self.p_test)
 
-        # 4) Sequencing among today's diagnoses
-        if diag_today > 0:
-            seq_today = np.random.binomial(int(diag_today), self.p_seq) # Observed sequences on day t
+        # 2) Sequencing among diagnosed
+        sequences = np.random.binomial(diagnoses, self.p_seq)
+
+        # 3) Variant infections per day (true infections)
+        if 'variant' in sim.results:
+            # Covasim variant tracking
+            self.variant_infections = sim.results['variant']['new_infections_by_variant'][:, 1]
         else:
-            seq_today = 0
+            # If variant tracking not enabled
+            self.variant_infections = np.zeros(n_days)
 
-        return diag_today, seq_today
+        # 4) Variant detection from sequencing
+        variant_detected = False
+
+        for day in range(n_days):
+            if sequences[day] > 0:
+                # For each sequenced sample, reconstruct haplotype
+                for _ in range(sequences[day]):
+                    # Fake genome: assume sim stores variant genomes
+                    genome = sim.people.genomes[sim.t] if hasattr(sim.people, 'genomes') else "REF"
+
+                    hap = self.reconstruct_haplotype(genome)
+
+                    if self.is_variant(hap):
+                        variant_detected = True
+                        if self.variant_detected_day is None:
+                            self.variant_detected_day = day
+                        break
+
+            if variant_detected:
+                break
+
+        return {
+            "diagnoses": diagnoses,
+            "sequences": sequences,
+            "variant_detected_day": self.variant_detected_day,
+            "variant_infections": self.variant_infections,
+        }

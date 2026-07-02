@@ -93,3 +93,36 @@ def sustained_increase(
             return False
 
     return True
+
+def variant_prevalence_threshold(
+    variant_prev: Sequence[float],
+    t: int,
+    threshold: float,
+) -> bool:
+    """
+    Trigger when variant prevalence exceeds threshold.
+    variant_prev[t] is between 0 and 1.
+    """
+    arr = _to_array(variant_prev)
+    if t < 0:
+        return False
+    return arr[t] >= threshold
+
+
+def variant_growth_rate_trigger(
+    variant_prev: Sequence[float],
+    t: int,
+    growth_threshold: float,
+    window: int = 7,
+) -> bool:
+    """
+    Trigger when variant prevalence increases rapidly:
+    (prev[t] - prev[t-window]) >= growth_threshold
+    """
+    arr = _to_array(variant_prev)
+
+    if t < window:
+        return False
+
+    growth = arr[t] - arr[t-window]
+    return growth >= growth_threshold
