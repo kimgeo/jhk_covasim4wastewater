@@ -47,11 +47,11 @@ class ObservationModel:
         n_days = sim.npts
 
         # 1) Diagnoses
-        true_infections = sim.results['new_infections'].values
+        true_infections = sim.results['new_infections'].values.astype(int)
         diagnoses = np.random.binomial(true_infections, self.p_test)
 
         # 2) Sequencing among diagnosed
-        sequences = np.random.binomial(diagnoses, self.p_seq)
+        sequences = np.random.binomial(diagnoses.astype(int), self.p_seq)
 
         # 3) Variant infections per day (true infections)
         if 'variant' in sim.results:

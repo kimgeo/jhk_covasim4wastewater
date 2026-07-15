@@ -1,0 +1,28 @@
+# configs/policy_sets.yaml
+
+policy_sets:
+
+  basic_grid:
+    p_test: [0.2, 0.4]
+    p_seq: [0.1, 0.2]
+    detection_threshold: [3, 5, 10]
+    delay_pmf:
+      - [1.0]
+      - [0.05, 0.15, 0.30, 0.25, 0.15, 0.07, 0.03]
+    quiet_period: [0, 3]
+
+  high_testing:
+    p_test: [0.4, 0.5]
+    p_seq: [0.2, 0.3]
+    detection_threshold: [3, 5]
+    delay_pmf:
+      - [0.05, 0.15, 0.30, 0.25, 0.15, 0.07, 0.03]
+    quiet_period: [0]
+
+  sequencing_focus:
+    p_test: [0.3]
+    p_seq: [0.3, 0.5]
+    detection_threshold: [3]
+    delay_pmf:
+      - [0.05, 0.15, 0.30, 0.25, 0.15, 0.07, 0.03]
+    quiet_period: [0, 2]

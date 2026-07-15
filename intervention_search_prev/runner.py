@@ -24,9 +24,10 @@ def run_strategy(strategy: Strategy, sim_pars, n_runs=1):
 
         if vp is not None:
             variant = cv.variant(
+                variant={},                 # Covasim 3.1.8 requires this
                 label='variantX',
-                rel_beta=vp['advantage'],
-                start_day=vp['intro_day']
+                days=vp['intro_day'],
+                n_imports=30,
             )
             sim.pars['variants'] = [variant]
 
@@ -104,7 +105,7 @@ def run_strategy(strategy: Strategy, sim_pars, n_runs=1):
             "sequences": daily_sequences,
             "variant_prevalence": daily_variant_prev,
             "variant_detected_day": obs_results["variant_detected_day"],
-            "variant_infections": obs_results["variant_infections"],
+            "variant_infections": daily_variant_prev,
             "trigger_days": trigger_days,
             "intervention_log": tracker.log,
         }

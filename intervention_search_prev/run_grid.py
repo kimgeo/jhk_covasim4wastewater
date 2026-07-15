@@ -9,7 +9,7 @@ import numpy as np
 import covasim as cv
 
 from runner import run_simulation
-from evaluator import evaluate_results
+from jhk_covasim4wastewater.intervention_search_prev.evaluation import evaluate_results
 from plot_result import plot_top3_and_baselines
 
 # Trigger functions

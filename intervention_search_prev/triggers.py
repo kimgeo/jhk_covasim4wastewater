@@ -126,3 +126,68 @@ def variant_growth_rate_trigger(
 
     growth = arr[t] - arr[t-window]
     return growth >= growth_threshold
+
+def check_triggers(
+    t,
+    diagnoses,
+    sequences,
+    variant_prev,
+    trigger_list,
+):
+    """
+    Unified trigger dispatcher.
+
+    runner.py expects:
+        check_triggers(t, diagnoses, sequences, variant_prev, trigger_list)
+
+    trigger_list is a list of:
+        (trigger_name, trigger_pars)
+    """
+
+    for trigger_name, pars in trigger_list:
+
+        # 1) sustained increase
+        if trigger_name == "sustained_increase":
+            if sustained_increase(diagnoses, t, pars.get("days", 5)):
+                return True
+
+        # 2) slope trigger
+        elif trigger_name == "slope_trigger":
+            if slope_trigger(diagnoses, t, pars["slope_threshold"]):
+                return True
+
+        # 3) weekly growth
+        elif trigger_name == "weekly_growth":
+            if weekly_growth(diagnoses, t, pars["ratio"], pars.get("window", 7)):
+                return True
+
+        # 4) relative threshold
+        elif trigger_name == "relative_threshold":
+            # sim is not passed here → runner.py must not use this trigger
+            # or you can modify runner.py to pass sim
+            raise NotImplementedError("relative_threshold requires sim, runner.py does not pass sim")
+
+        # 5) variant prevalence threshold
+        elif trigger_name == "variant_prevalence_threshold":
+            if variant_prevalence_threshold(variant_prev, t, pars["threshold"]):
+                return True
+
+        # 6) variant growth rate trigger
+        elif trigger_name == "variant_growth_rate_trigger":
+            if variant_growth_rate_trigger(
+                variant_prev,
+                t,
+                pars["growth_threshold"],
+                pars.get("window", 7)
+            ):
+                return True
+
+        # 7) sequencing-based trigger (optional)
+        elif trigger_name == "sequence_threshold":
+            if sequences[t] >= pars["threshold"]:
+                return True
+
+        else:
+            raise ValueError(f"Unknown trigger: {trigger_name}")
+
+    return False
