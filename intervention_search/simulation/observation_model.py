@@ -79,11 +79,19 @@ class ObservationModel:
             self.daily_sequences[diag_day] += seq_count
 
             if seq_count > 0:
-                infectious_agents = np.where(sim.people.infectious)[0]
-                if len(infectious_agents) > 0:
+                infection_log = sim.people.infection_log
+                newly_infected_today = [
+                    entry["target"]
+                    for entry in infection_log
+                    if entry["date"] == t
+                ]
+
+                if len(newly_infected_today) > 0:
                     chosen = np.random.choice(
-                        infectious_agents,
-                        size=min(seq_count, len(infectious_agents)),
+                        newly_infected_today,
+                        size=min(seq_count, len(newly_infected_today)),
                         replace=False,
                     )
-                    self.daily_sequenced_agents[diag_day].extend(chosen.tolist())
+
+                    event_ids = [f"{agent}_{t}" for agent in chosen]
+                    self.daily_sequenced_agents[diag_day].extend(event_ids)
