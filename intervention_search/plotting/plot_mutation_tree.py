@@ -3,6 +3,8 @@
 import matplotlib.pyplot as plt
 import networkx as nx
 from networkx.drawing.nx_agraph import graphviz_layout
+from Bio import Phylo
+import matplotlib.pyplot as plt
 
 def plot_mutation_tree(
     G,
@@ -103,13 +105,16 @@ def plot_erase_mutation_tree(
     savepath=None,
     show=True,
     detection_day=None,
-    erase=True,          # True = edge -> delete, False = edge -> transparent
+    erase=True,
     sequenced_only=False,
     collapse=False,
 ):
     """
     Plot mutation tree but erase (or fade) edges whose descendants
     do NOT include any sequenced nodes.
+    Uses precomputed:
+        - G.nodes[n]["sequenced"]
+        - G.nodes[n]["has_seq_descendant"]
     """
 
     from analysis.mutation_tree import extract_sequenced_subtree, collapse_clades
@@ -125,21 +130,13 @@ def plot_erase_mutation_tree(
 
     fig, ax = plt.subplots(figsize=(14, 12))
 
-    subtree_has_seq = {}
-    for n in G.nodes:
-        desc = nx.descendants(G, n)
-        subtree_has_seq[n] = (
-            G.nodes[n].get("sequenced", False)
-            or any(G.nodes[d].get("sequenced", False) for d in desc)
-        )
-
     # Draw edges
     for src, tgt, data in G.edges(data=True):
         if src not in pos or tgt not in pos:
             continue
 
-        # If src has no sequenced descendants → erase or fade
-        if not subtree_has_seq[tgt]:
+        # Use precomputed has_seq_descendant
+        if not G.nodes[tgt].get("has_seq_descendant", False):
             if erase:
                 continue
             alpha = 0.4
@@ -156,31 +153,22 @@ def plot_erase_mutation_tree(
 
         ax.plot([x1, x2], [y1, y2], color=color, linewidth=lw, alpha=alpha)
 
-    # Draw sequenced nodes
-    seq_x = []
-    seq_y = []
-    mut_x = []
-    mut_y = []
+    # Draw nodes
+    seq_x, seq_y = [], []
 
     for n in G.nodes:
+        if n not in pos:
+            continue
+
+        x, y = pos[n]
+
         if G.nodes[n].get("sequenced", False):
-            if G.nodes[n].get("mutations", False):
-                if n not in pos:
-                    continue
-                x, y = pos[n]
-                mut_x.append(x)
-                mut_y.append(y)
-            else:
-                if n not in pos:
-                    continue
-                x, y = pos[n]
-                seq_x.append(x)
-                seq_y.append(y)
-
+            seq_x.append(x)
+            seq_y.append(y)
     ax.scatter(seq_x, seq_y, color="red", s=20, alpha=0.9)
-    ax.scatter(mut_x, mut_y, color="blue", s=20, alpha=0.9)
 
-    ax.set_title("Event-based Infection Tree (sequenced = red)", fontsize=14)
+
+    ax.set_title("Infection Tree (sequenced = red)", fontsize=14)
 
     if detection_day is not None:
         ax.text(
@@ -203,3 +191,28 @@ def plot_erase_mutation_tree(
         plt.show()
     else:
         plt.close(fig)
+
+def plot_phylo_tree(newick_path, savepath=None):
+    tree = Phylo.read(newick_path, "newick")
+
+    fig = plt.figure(figsize=(10, 40))
+    ax = fig.add_subplot(1, 1, 1)
+
+    Phylo.draw(tree, do_show=False, axes=ax)
+
+    for text in ax.texts:
+        text.set_fontsize(6)
+        text.set_color("#2c3e50")
+
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.get_yaxis().set_visible(False)
+
+    plt.title("Phylogenetic Tree (JC69)", fontsize=14, pad=20)
+    plt.tight_layout()
+
+    if savepath:
+        plt.savefig(savepath, dpi=300, bbox_inches='tight')
+
+    plt.show()

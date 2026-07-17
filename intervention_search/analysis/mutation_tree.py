@@ -1,6 +1,7 @@
 # analysis/mutation_tree.py
 
 import networkx as nx
+import covasim as cv
 from collections import defaultdict
 
 
@@ -134,3 +135,200 @@ def collapse_clades(G):
             CG.add_edge(super_root, n)
 
     return CG
+
+def build_infection_seq_tree(sim, daily_sequenced_agents):
+    """
+    Build a mutation-collapsed infection sequence tree.
+    Each node represents a unique mutation state (haplotype).
+    Each edge represents a mutation event.
+    Also tracks:
+        - sequenced: whether any infection event in this mutation state was sequenced
+        - has_seq_descendant: whether any descendant mutation state has a sequenced event
+    """
+
+    # infection log
+    infection_log = getattr(sim, "infection_log", None)
+    if infection_log is None:
+        infection_log = getattr(sim.people, "infection_log", None)
+    if infection_log is None:
+        raise ValueError("Simulation has no infection_log.")
+
+    # sequenced event IDs
+    sequenced_event_ids = set()
+    for day_list in daily_sequenced_agents:
+        sequenced_event_ids.update(day_list)
+
+    # mutation tree structures
+    mutation_nodes = {}   # mutation_state -> node_id
+    node_events = {}      # node_id -> list of event_ids
+    G = nx.DiGraph()
+
+    # root mutation state
+    root_state = frozenset()
+    mutation_nodes[root_state] = "Node_0"
+    node_events["Node_0"] = []
+    G.add_node("Node_0", mutations=root_state,
+               sequenced=False,
+               has_seq_descendant=False)
+
+    # agent -> current mutation state
+    current_state = {}
+
+    for entry in infection_log:
+        if entry["source"] is None:
+            tgt = entry["target"]
+            date = entry["date"]
+            event_id = f"{tgt}_{date}"
+
+            # initial pop_infected is root mutation state
+            current_state[tgt] = root_state
+            node_events["Node_0"].append(event_id)
+
+            if event_id in sequenced_event_ids:
+                G.nodes["Node_0"]["sequenced"] = True
+                G.nodes["Node_0"]["has_seq_descendant"] = True
+
+    for entry in infection_log:
+        src = entry["source"]
+        tgt = entry["target"]
+        date = entry["date"]
+        event_id = f"{tgt}_{date}"
+
+        branch_mut = tuple(entry.get("branch_mutations", []))
+
+        # parent mutation state
+        if src is None:
+            parent_state = root_state
+        else:
+            parent_state = current_state[src]
+
+        if len(branch_mut) == 0:
+            current_state[tgt] = parent_state
+            node_id = mutation_nodes[parent_state]
+            node_events[node_id].append(event_id)
+
+            if event_id in sequenced_event_ids:
+                G.nodes[node_id]["sequenced"] = True
+                G.nodes[node_id]["has_seq_descendant"] = True
+                for ancestor in nx.ancestors(G, node_id):
+                    G.nodes[ancestor]["has_seq_descendant"] = True
+
+            continue
+
+        # if mutated -> new mutation state
+        new_state = frozenset(parent_state | set(branch_mut))
+
+        # if new mutation state -> new node
+        if new_state not in mutation_nodes:
+            new_node_id = f"Node_{len(mutation_nodes)}"
+            mutation_nodes[new_state] = new_node_id
+            node_events[new_node_id] = []
+
+            G.add_node(new_node_id,
+                       mutations=new_state,
+                       sequenced=False,
+                       has_seq_descendant=False)
+
+            # parent -> new_state edge
+            parent_node_id = mutation_nodes[parent_state]
+            G.add_edge(parent_node_id, new_node_id)
+
+        # agent state update
+        current_state[tgt] = new_state
+
+        # event
+        node_id = mutation_nodes[new_state]
+        node_events[node_id].append(event_id)
+
+        # sequenced flag
+        if event_id in sequenced_event_ids:
+            G.nodes[node_id]["sequenced"] = True
+            G.nodes[node_id]["has_seq_descendant"] = True
+            for ancestor in nx.ancestors(G, node_id):
+                G.nodes[ancestor]["has_seq_descendant"] = True
+
+    return G, mutation_nodes, node_events
+
+def mutation_tree_to_newick(G, root="Node_0"):
+
+    def dfs(node):
+        children = list(G.successors(node))
+        label = node
+
+        # annotation
+        ann = []
+        if G.nodes[node].get("sequenced", False):
+            ann.append("sequenced=true")
+        if G.nodes[node].get("has_seq_descendant", False):
+            ann.append("has_seq_descendant=true")
+
+        if ann:
+            label = f"{label}[&{','.join(ann)}]"
+
+        if not children:
+            return label
+
+        child_str = ",".join(dfs(c) for c in children)
+        return f"({child_str}){label}"
+
+    return dfs(root) + ";"
+
+def extract_sequenced_subtree(G):
+    """
+    Return a pruned mutation tree containing only nodes
+    whose subtree has at least one sequenced event.
+    """
+
+    H = G.copy()
+
+    to_remove = [n for n in H.nodes
+                 if not H.nodes[n].get("has_seq_descendant", False)]
+
+    H.remove_nodes_from(to_remove)
+
+    return H
+
+
+def reconstruct_haplotype_from_mutation_state(sim, mutation_state):
+    """
+    mutation_state: frozenset of mutation IDs (integers)
+    returns: nucleotide string
+    """
+    # reference genome
+    ref = sim.sequence_tracker.reference.copy()
+
+    # apply SNPs
+    for site, ref_nt, alt_nt in mutation_state:
+        ref[site] = alt_nt
+
+    return cv.decode_sequence(ref)
+
+def export_fasta_from_G(G_prune, sim, filepath):
+    """
+    Write FASTA file where each record corresponds to a mutation-state node in G_prune.
+    """
+
+    with open(filepath, "w") as f:
+        for node in G_prune.nodes:
+            mut_state = G_prune.nodes[node]["mutations"]
+            hap = reconstruct_haplotype_from_mutation_state(sim, mut_state)
+
+            f.write(f">{node}\n")
+            f.write(hap + "\n")
+
+def infer_tree_jc69(fasta_path):
+    """
+    Run IQ-TREE with JC69 model.
+    Output: fasta_path.treefile
+    """
+    import subprocess
+
+    cmd = [
+        "iqtree",
+        "-s", fasta_path,
+        "-m", "JC69",
+    ]
+    subprocess.run(cmd, check=True)
+
+    return fasta_path + ".treefile"
+
