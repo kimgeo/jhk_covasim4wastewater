@@ -1,35 +1,33 @@
-# plotting/plot_mutation_tree.py
+"""
+Static tree visualizations: the raw event-based / mutation-collapsed
+infection tree, and a rendered phylogenetic (JC69) tree.
+"""
 
 import matplotlib.pyplot as plt
-import networkx as nx
-from networkx.drawing.nx_agraph import graphviz_layout
 from Bio import Phylo
-import matplotlib.pyplot as plt
+from networkx.drawing.nx_agraph import graphviz_layout
 
-def plot_mutation_tree(
-    G,
-    savepath=None,
-    show=True,
-    detection_day=None,
-    sequenced_only=False,
-    collapse=False,
-):
-    """
-    Plot event-based mutation tree in tidy-style layout.
-    Nodes are not drawn except sequenced nodes.
-    Branch length is proportional to mutation count.
-    """
+from analysis.mutation_tree import extract_sequenced_subtree
 
-    from analysis.mutation_tree import extract_sequenced_subtree, collapse_clades
 
+def _maybe_restrict(G, sequenced_only, collapse):
+    if collapse:
+        raise NotImplementedError(
+            "collapse_clades was removed: it referenced an edge attribute "
+            "('mutations') that the tree builders never set, and no "
+            "notebook ever called this with collapse=True."
+        )
     if sequenced_only:
         G = extract_sequenced_subtree(G)
+    return G
 
-    if collapse:
-        G = collapse_clades(G)
+
+def plot_mutation_tree(G, savepath=None, show=True, detection_day=None,
+                        sequenced_only=False, collapse=False):
+    """Tidy-layout tree; only sequenced nodes are drawn as points."""
+    G = _maybe_restrict(G, sequenced_only, collapse)
 
     pos = graphviz_layout(G, prog="dot")
-
     fig, ax = plt.subplots(figsize=(14, 12))
 
     for src, tgt, data in G.edges(data=True):
@@ -37,182 +35,86 @@ def plot_mutation_tree(
             continue
         x1, y1 = pos[src]
         x2, y2 = pos[tgt]
-
-        n_mut = data.get("n_mut", 1)
-        lw = 0.5 + 0.1 * n_mut
-
+        lw = 0.5 + 0.1 * data.get("n_mut", 1)
         ax.plot([x1, x2], [y1, y2], color="black", linewidth=lw, alpha=0.8)
 
-    seq_x = []
-    seq_y = []
-    for n in G.nodes:
-        if G.nodes[n].get("sequenced", False):
-            if n not in pos:
-                continue
-            x, y = pos[n]
-            seq_x.append(x)
-            seq_y.append(y)
-
-    ax.scatter(seq_x, seq_y, color="red", s=20, alpha=0.9)
+    seq_xy = [pos[n] for n in G.nodes if G.nodes[n].get("sequenced", False) and n in pos]
+    if seq_xy:
+        ax.scatter(*zip(*seq_xy), color="red", s=20, alpha=0.9)
 
     ax.set_title("Event-based Infection Tree", fontsize=14)
-
-    if detection_day is not None:
-        ax.text(
-            0.5,
-            1.02,
-            f"Detection day: {detection_day}",
-            transform=ax.transAxes,
-            ha="center",
-            fontsize=11,
-            color="blue",
-        )
-
     ax.axis("off")
     plt.tight_layout()
 
     if savepath:
         plt.savefig(savepath, dpi=200)
-
     if show:
         plt.show()
     else:
         plt.close(fig)
 
-def spread_levels(G, pos):
-    depths = {}
-    root = "None_0"
-    for node in G.nodes:
-        try:
-            depths[node] = nx.shortest_path_length(G, root, node)
-        except:
-            depths[node] = 0
-    level_nodes = {}
-    for node, d in depths.items():
-        level_nodes.setdefault(d, []).append(node)
 
-    new_pos = {}
-    for d, nodes in level_nodes.items():
-        for i, node in enumerate(nodes):
-            x, y = pos[node]
-            new_pos[node] = (i, -d)
-
-    return new_pos
-
-
-def plot_erase_mutation_tree(
-    G,
-    savepath=None,
-    show=True,
-    detection_day=None,
-    erase=True,
-    sequenced_only=False,
-    collapse=False,
-):
+def plot_erase_mutation_tree(G, savepath=None, show=True, detection_day=None,
+                              erase=True, sequenced_only=False, collapse=False):
     """
-    Plot mutation tree but erase (or fade) edges whose descendants
-    do NOT include any sequenced nodes.
-    Uses precomputed:
-        - G.nodes[n]["sequenced"]
-        - G.nodes[n]["has_seq_descendant"]
+    Same tree, but edges leading to a subtree with no sequenced event are
+    either dropped (erase=True) or faded (erase=False).
     """
-
-    from analysis.mutation_tree import extract_sequenced_subtree, collapse_clades
-
-    # Optionally restrict to sequenced subtree
-    if sequenced_only:
-        G = extract_sequenced_subtree(G)
-
-    if collapse:
-        G = collapse_clades(G)
+    G = _maybe_restrict(G, sequenced_only, collapse)
 
     pos = graphviz_layout(G, prog="dot")
-
     fig, ax = plt.subplots(figsize=(14, 12))
 
-    # Draw edges
     for src, tgt, data in G.edges(data=True):
         if src not in pos or tgt not in pos:
             continue
-
-        # Use precomputed has_seq_descendant
         if not G.nodes[tgt].get("has_seq_descendant", False):
             if erase:
                 continue
-            alpha = 0.4
-            color = "black"
+            alpha, color = 0.4, "black"
         else:
-            alpha = 1.0
-            color = "red"
+            alpha, color = 1.0, "blue"
 
         x1, y1 = pos[src]
         x2, y2 = pos[tgt]
-
-        n_mut = data.get("n_mut", 1)
-        lw = 0.5 + 0.1 * n_mut
-
+        lw = 1 + 0.2 * data.get("n_mut", 1)
         ax.plot([x1, x2], [y1, y2], color=color, linewidth=lw, alpha=alpha)
 
-    # Draw nodes
-    seq_x, seq_y = [], []
+    seq_xy = [pos[n] for n in G.nodes if G.nodes[n].get("sequenced", False) and n in pos]
+    if seq_xy:
+        ax.scatter(*zip(*seq_xy), color="blue", s=40, alpha=0.9)
 
-    for n in G.nodes:
-        if n not in pos:
-            continue
-
-        x, y = pos[n]
-
-        if G.nodes[n].get("sequenced", False):
-            seq_x.append(x)
-            seq_y.append(y)
-    ax.scatter(seq_x, seq_y, color="red", s=20, alpha=0.9)
-
-
-    ax.set_title("Infection Tree (sequenced = red)", fontsize=14)
-
+    ax.set_title("Ground Truth Transmission Tree (sequenced = blue)", fontsize=30)
     if detection_day is not None:
-        ax.text(
-            0.5,
-            1.02,
-            f"Detection day: {detection_day}",
-            transform=ax.transAxes,
-            ha="center",
-            fontsize=11,
-            color="blue",
-        )
-
+        ax.text(0.5, 1.02, f"Detection day: {detection_day}", transform=ax.transAxes,
+                ha="center", fontsize=11, color="blue")
     ax.axis("off")
     plt.tight_layout()
 
     if savepath:
-        plt.savefig(savepath, dpi=200)
-
+        plt.savefig(savepath, dpi=1000)
     if show:
         plt.show()
     else:
         plt.close(fig)
 
+
 def plot_phylo_tree(newick_path, savepath=None):
     tree = Phylo.read(newick_path, "newick")
-
     fig = plt.figure(figsize=(10, 40))
     ax = fig.add_subplot(1, 1, 1)
-
     Phylo.draw(tree, do_show=False, axes=ax)
 
     for text in ax.texts:
         text.set_fontsize(6)
         text.set_color("#2c3e50")
 
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.spines['left'].set_visible(False)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
     ax.get_yaxis().set_visible(False)
 
     plt.title("Phylogenetic Tree (JC69)", fontsize=14, pad=20)
     plt.tight_layout()
-
     if savepath:
-        plt.savefig(savepath, dpi=300, bbox_inches='tight')
-
+        plt.savefig(savepath, dpi=300, bbox_inches="tight")
     plt.show()

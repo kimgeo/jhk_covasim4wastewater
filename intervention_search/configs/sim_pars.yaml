@@ -1,5 +1,3 @@
-# configs/sim_pars.yaml
-
 pop_size: 50000
 pop_type: hybrid
 n_days: 180
@@ -10,10 +8,8 @@ start_day: 2020-01-01
 
 pop_infected: 20
 
-# fix seed (run multiple time with different seeds for ensemble)
+# fix seed (run multiple times with different seeds for ensemble)
 rand_seed: 1
 
 # Result saving option
 verbose: 0
-
-

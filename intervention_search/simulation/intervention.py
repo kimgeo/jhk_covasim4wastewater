@@ -1,54 +1,39 @@
-# intervention_search/simulation/intervention.py
+"""
+Reduces beta once triggered and keeps it reduced for a fixed duration.
+Beta is not restored afterwards -- Covasim's own dynamics continue from
+the reduced value.
+"""
+
 
 class InterventionController:
-    """
-    Handles:
-      - beta reduction when intervention starts
-      - intervention duration
-      - (NO RESTORE) beta stays reduced; Covasim dynamics handle future changes
-    """
-
     def __init__(self, policy):
         self.beta_reduction = policy.get("beta_reduction", 0.3)
         self.beta_min = policy.get("beta_min", 0.005)
-        self.intervention_duration = policy.get("intervention_duration", 14)
+        # NOTE: configs/intervention_policies.yaml uses the key "duration"
+        # (not "intervention_duration", which this used to read -- that
+        # mismatch meant every policy silently fell back to the default
+        # of 14 days regardless of what the YAML said).
+        self.duration = policy.get("duration", 14)
 
-        # internal state
         self.active = False
         self.intervention_day = None
-
         self.intervention_days = []
+
+        # populated by Runner after the run finishes, for plotting
         self.gt_triggers = []
         self.diag_triggers = []
 
     def start(self, sim, t):
-        """
-        Called by Runner when an intervention is triggered.
-        """
         if self.active:
             return
-
         self.intervention_day = t
-        self.intervention_days.append(t)   # NEW: record intervention start
-
-        self._activate_intervention(sim)
+        self.intervention_days.append(t)
+        self._activate(sim)
         self.active = True
 
     def update(self, sim, t):
-        """
-        Called every day by Runner.
-        Ends intervention after duration, but DOES NOT restore beta.
-        """
-        if not self.active:
-            return
-
-        if t >= self.intervention_day + self.intervention_duration:
-            # simply end intervention; do NOT restore beta
+        if self.active and t >= self.intervention_day + self.duration:
             self.active = False
 
-    def _activate_intervention(self, sim):
-        """
-        Reduce beta when intervention starts.
-        """
-        new_beta = max(sim.pars["beta"] * (1 - self.beta_reduction), self.beta_min)
-        sim.pars["beta"] = new_beta
+    def _activate(self, sim):
+        sim.pars["beta"] = max(sim.pars["beta"] * (1 - self.beta_reduction), self.beta_min)
